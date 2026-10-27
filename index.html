@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0">
+    <title>Tabla Periódica WebAR VR - Giroscopio Corregido</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            box-sizing: border-box;
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        /* Stream de la cámara para WebAR */
+        #ar-camera-video {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: 1;
+            display: block;
+            background: #000;
+        }
+
+        /* Canvas de Renderizado Three.js */
+        #webgl-canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            pointer-events: auto;
+        }
+
+        /* UI Botones sobre la escena */
+        #ui-bar {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 30;
+            display: flex;
+            gap: 10px;
+            background: rgba(10, 15, 30, 0.85);
+            backdrop-filter: blur(12px);
+            padding: 10px 18px;
+            border-radius: 9999px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+            max-width: 95vw;
+            overflow-x: auto;
+        }
+
+        .btn-ui {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            padding: 10px 16px;
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn-ui:active {
+            transform: scale(0.95);
+        }
+
+        .btn-ui.active {
+            background: #06b6d4;
+            border-color: #38bdf8;
+            box-shadow: 0 0 14px rgba(6, 182, 212, 0.6);
+        }
+
+        /* Modales / Pantalla de Solicitud de Permisos */
+        #permission-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            background: linear-gradient(135deg, #030712 0%, #0f172a 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.25rem;
+            color: #fff;
+        }
+
+        .glow-card {
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            box-shadow: 0 0 40px rgba(6, 182, 212, 0.15);
+        }
+
+        /* Banner de estado de giroscopio */
+        #gyro-status {
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #38bdf8;
+            padding: 6px 16px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Video Element para Cámara Real AR -->
+    <video id="ar-camera-video" autoplay playsinline muted></video>
+
+    <!-- Canvas 3D de Three.js -->
+    <div id="webgl-canvas-container"></div>
+
+    <!-- Indicador de Sensores -->
+    <div id="gyro-status">
+        <div id="gyro-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></div>
+        <span id="gyro-text">Giroscopio pendiente</span>
+    </div>
+
+    <!-- Barra de Controles Inferior -->
+    <div id="ui-bar" style="display: none;">
+        <button id="btn-toggle-cam" class="btn-ui active">
+            <i class="fa-solid fa-camera"></i>
+            <span>Cámara AR</span>
+        </button>
+        <button id="btn-request-gyro" class="btn-ui">
+            <i class="fa-solid fa-compass"></i>
+            <span>Giroscopio</span>
+        </button>
+        <button id="btn-sbs" class="btn-ui">
+            <i class="fa-solid fa-vr-cardboard"></i>
+            <span>VR (SBS)</span>
+        </button>
+        <button id="btn-recenter" class="btn-ui">
+            <i class="fa-solid fa-crosshairs"></i>
+            <span>Reorientar</span>
+        </button>
+    </div>
+
+    <!-- Screen Overlay de Inicio / Solicitud de Permisos -->
+    <div id="permission-overlay">
+        <div class="max-w-md w-full glow-card p-6 rounded-3xl text-center space-y-5">
+            <div class="w-20 h-20 bg-cyan-500/20 text-cyan-400 rounded-full flex items-center justify-center mx-auto text-4xl border border-cyan-500/40 shadow-lg shadow-cyan-500/20">
+                <i class="fa-solid fa-atom"></i>
+            </div>
+
+            <div>
+                <h1 class="text-2xl font-black tracking-wide text-white">TABLA PERIÓDICA AR / VR</h1>
+                <p class="text-xs text-cyan-400 font-semibold tracking-wider mt-1 uppercase">118 Elementos • Giroscopio 3D • Visión SBS</p>
+            </div>
+
+            <!-- Aviso HTTPS para sensores -->
+            <div id="https-warning" class="hidden text-left bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl text-amber-300 text-xs">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1"></i>
+                <strong>Atención:</strong> Los giroscopios móviles requieren <code>HTTPS</code> o <code>localhost</code>. Si estás abriendo el archivo como <code>http://</code>, el giroscopio se bloqueará por seguridad y la app funcionará con control táctil.
+            </div>
+
+            <p class="text-slate-300 text-sm leading-relaxed text-left bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
+                Para proyectar la tabla periódica en realidad aumentada y explorar los elementos girando tu celular o usando gafas VR, presiona el botón inferior para autorizar sensores y cámara.
+            </p>
+
+            <div class="space-y-3">
+                <button id="btn-start-experience" class="w-full py-4 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-2xl shadow-lg shadow-cyan-500/30 transition active:scale-95 flex items-center justify-center gap-3 cursor-pointer text-base">
+                    <i class="fa-solid fa-play"></i>
+                    <span>INICIAR Y ACTIVAR SENSORES</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // DATASET COMPLETO DE LOS 118 ELEMENTOS
+        // ==========================================
+        const ELEMENTS_DATA = [
+            { n: 1, s: "H", name: "Hidrógeno", mass: "1.008", cat: "nonmetal", g: 1, p: 1, e: [1] },
+            { n: 2, s: "He", name: "Helio", mass: "4.0026", cat: "noble", g: 18, p: 1, e: [2] },
+            { n: 3, s: "Li", name: "Litio", mass: "6.94", cat: "alkali", g: 1, p: 2, e: [2, 1] },
+            { n: 4, s: "Be", name: "Berilio", mass: "9.0122", cat: "alkaline", g: 2, p: 2, e: [2, 2] },
+            { n: 5, s: "B", name: "Boro", mass: "10.81", cat: "metalloid", g: 13, p: 2, e: [2, 3] },
+            { n: 6, s: "C", name: "Carbono", mass: "12.011", cat: "nonmetal", g: 14, p: 2, e: [2, 4] },
+            { n: 7, s: "N", name: "Nitrógeno", mass: "14.007", cat: "nonmetal", g: 15, p: 2, e: [2, 5] },
+            { n: 8, s: "O", name: "Oxígeno", mass: "15.999", cat: "nonmetal", g: 16, p: 2, e: [2, 6] },
+            { n: 9, s: "F", name: "Flúor", mass: "18.998", cat: "halogen", g: 17, p: 2, e: [2, 7] },
+            { n: 10, s: "Ne", name: "Neón", mass: "20.180", cat: "noble", g: 18, p: 2, e: [2, 8] },
+            { n: 11, s: "Na", name: "Sodio", mass: "22.990", cat: "alkali", g: 1, p: 3, e: [2, 8, 1] },
+            { n: 12, s: "Mg", name: "Magnesio", mass: "24.305", cat: "alkaline", g: 2, p: 3, e: [2, 8, 2] },
+            { n: 13, s: "Al", name: "Aluminio", mass: "26.982", cat: "post-transition", g: 13, p: 3, e: [2, 8, 3] },
+            { n: 14, s: "Si", name: "Silicio", mass: "28.085", cat: "metalloid", g: 14, p: 3, e: [2, 8, 4] },
+            { n: 15, s: "P", name: "Fósforo", mass: "30.974", cat: "nonmetal", g: 15, p: 3, e: [2, 8, 5] },
+            { n: 16, s: "S", name: "Azufre", mass: "32.06", cat: "nonmetal", g: 16, p: 3, e: [2, 8, 6] },
+            { n: 17, s: "Cl", name: "Cloro", mass: "35.45", cat: "halogen", g: 17, p: 3, e: [2, 8, 7] },
+            { n: 18, s: "Ar", name: "Argón", mass: "39.948", cat: "noble", g: 18, p: 3, e: [2, 8, 8] },
+            { n: 19, s: "K", name: "Potasio", mass: "39.098", cat: "alkali", g: 1, p: 4, e: [2, 8, 8, 1] },
+            { n: 20, s: "Ca", name: "Calcio", mass: "40.078", cat: "alkaline", g: 2, p: 4, e: [2, 8, 8, 2] },
+            { n: 21, s: "Sc", name: "Escandio", mass: "44.956", cat: "transition", g: 3, p: 4, e: [2, 8, 9, 2] },
+            { n: 22, s: "Ti", name: "Titanio", mass: "47.867", cat: "transition", g: 4, p: 4, e: [2, 8, 10, 2] },
+            { n: 23, s: "V", name: "Vanadio", mass: "50.942", cat: "transition", g: 5, p: 4, e: [2, 8, 11, 2] },
+            { n: 24, s: "Cr", name: "Cromo", mass: "51.996", cat: "transition", g: 6, p: 4, e: [2, 8, 13, 1] },
+            { n: 25, s: "Mn", name: "Manganeso", mass: "54.938", cat: "transition", g: 7, p: 4, e: [2, 8, 13, 2] },
+            { n: 26, s: "Fe", name: "Hierro", mass: "55.845", cat: "transition", g: 8, p: 4, e: [2, 8, 14, 2] },
+            { n: 27, s: "Co", name: "Cobalto", mass: "58.933", cat: "transition", g: 9, p: 4, e: [2, 8, 15, 2] },
+            { n: 28, s: "Ni", name: "Níquel", mass: "58.693", cat: "transition", g: 10, p: 4, e: [2, 8, 16, 2] },
+            { n: 29, s: "Cu", name: "Cobre", mass: "63.546", cat: "transition", g: 11, p: 4, e: [2, 8, 18, 1] },
+            { n: 30, s: "Zn", name: "Cinc", mass: "65.38", cat: "transition", g: 12, p: 4, e: [2, 8, 18, 2] },
+            { n: 31, s: "Ga", name: "Galio", mass: "69.723", cat: "post-transition", g: 13, p: 4, e: [2, 8, 18, 3] },
+            { n: 32, s: "Ge", name: "Germanio", mass: "72.630", cat: "metalloid", g: 14, p: 4, e: [2, 8, 18, 4] },
+            { n: 33, s: "As", name: "Arsénico", mass: "74.922", cat: "metalloid", g: 15, p: 4, e: [2, 8, 18, 5] },
+            { n: 34, s: "Se", name: "Selenio", mass: "78.971", cat: "nonmetal", g: 16, p: 4, e: [2, 8, 18, 6] },
+            { n: 35, s: "Br", name: "Bromo", mass: "79.904", cat: "halogen", g: 17, p: 4, e: [2, 8, 18, 7] },
+            { n: 36, s: "Kr", name: "Kriptón", mass: "83.798", cat: "noble", g: 18, p: 4, e: [2, 8, 18, 8] },
+            { n: 37, s: "Rb", name: "Rubidio", mass: "85.468", cat: "alkali", g: 1, p: 5, e: [2, 8, 18, 8, 1] },
+            { n: 38, s: "Sr", name: "Estroncio", mass: "87.62", cat: "alkaline", g: 2, p: 5, e: [2, 8, 18, 8, 2] },
+            { n: 39, s: "Y", name: "Itrio", mass: "88.906", cat: "transition", g: 3, p: 5, e: [2, 8, 18, 9, 2] },
+            { n: 40, s: "Zr", name: "Circonio", mass: "91.224", cat: "transition", g: 4, p: 5, e: [2, 8, 18, 10, 2] },
+            { n: 41, s: "Nb", name: "Niobio", mass: "92.906", cat: "transition", g: 5, p: 5, e: [2, 8, 18, 12, 1] },
+            { n: 42, s: "Mo", name: "Molibdeno", mass: "95.95", cat: "transition", g: 6, p: 5, e: [2, 8, 18, 13, 1] },
+            { n: 43, s: "Tc", name: "Tecnecio", mass: "98", cat: "transition", g: 7, p: 5, e: [2, 8, 18, 13, 2] },
+            { n: 44, s: "Ru", name: "Rutenio", mass: "101.07", cat: "transition", g: 8, p: 5, e: [2, 8, 18, 15, 1] },
+            { n: 45, s: "Rh", name: "Rodio", mass: "102.91", cat: "transition", g: 9, p: 5, e: [2, 8, 18, 16, 1] },
+            { n: 46, s: "Pd", name: "Paladio", mass: "106.42", cat: "transition", g: 10, p: 5, e: [2, 8, 18, 18] },
+            { n: 47, s: "Ag", name: "Plata", mass: "107.87", cat: "transition", g: 11, p: 5, e: [2, 8, 18, 18, 1] },
+            { n: 48, s: "Cd", name: "Cadmio", mass: "112.41", cat: "transition", g: 12, p: 5, e: [2, 8, 18, 18, 2] },
+            { n: 49, s: "In", name: "Indio", mass: "114.82", cat: "post-transition", g: 13, p: 5, e: [2, 8, 18, 18, 3] },
+            { n: 50, s: "Sn", name: "Estaño", mass: "118.71", cat: "post-transition", g: 14, p: 5, e: [2, 8, 18, 18, 4] },
+            { n: 51, s: "Sb", name: "Antimonio", mass: "121.76", cat: "metalloid", g: 15, p: 5, e: [2, 8, 18, 18, 5] },
+            { n: 52, s: "Te", name: "Telurio", mass: "127.60", cat: "metalloid", g: 16, p: 5, e: [2, 8, 18, 18, 6] },
+            { n: 53, s: "I", name: "Yodo", mass: "126.90", cat: "halogen", g: 17, p: 5, e: [2, 8, 18, 18, 7] },
+            { n: 54, s: "Xe", name: "Xenón", mass: "131.29", cat: "noble", g: 18, p: 5, e: [2, 8, 18, 18, 8] },
+            { n: 55, s: "Cs", name: "Cesio", mass: "132.91", cat: "alkali", g: 1, p: 6, e: [2, 8, 18, 18, 8, 1] },
+            { n: 56, s: "Ba", name: "Bario", mass: "137.33", cat: "alkaline", g: 2, p: 6, e: [2, 8, 18, 18, 8, 2] },
+            { n: 57, s: "La", name: "Lantano", mass: "138.91", cat: "lanthanide", g: 3, p: 6, e: [2, 8, 18, 18, 9, 2] },
+            { n: 58, s: "Ce", name: "Cerio", mass: "140.12", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 19, 9, 2] },
+            { n: 59, s: "Pr", name: "Praseodimio", mass: "140.91", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 21, 8, 2] },
+            { n: 60, s: "Nd", name: "Neodimio", mass: "144.24", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 22, 8, 2] },
+            { n: 61, s: "Pm", name: "Prometio", mass: "145", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 23, 8, 2] },
+            { n: 62, s: "Sm", name: "Samario", mass: "150.36", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 25, 8, 2] },
+            { n: 63, s: "Eu", name: "Europio", mass: "151.96", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 25, 8, 2] },
+            { n: 64, s: "Gd", name: "Gadolinio", mass: "157.25", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 25, 9, 2] },
+            { n: 65, s: "Tb", name: "Terbio", mass: "158.93", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 27, 8, 2] },
+            { n: 66, s: "Dy", name: "Disprosio", mass: "162.50", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 28, 8, 2] },
+            { n: 67, s: "Ho", name: "Holmio", mass: "164.93", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 29, 8, 2] },
+            { n: 68, s: "Er", name: "Erbio", mass: "167.26", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 30, 8, 2] },
+            { n: 69, s: "Tm", name: "Tulio", mass: "168.93", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 31, 8, 2] },
+            { n: 70, s: "Yb", name: "Iterbio", mass: "173.05", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 32, 8, 2] },
+            { n: 71, s: "Lu", name: "Lutecio", mass: "174.97", cat: "lanthanide", g: 3, p: 8, e: [2, 8, 18, 32, 9, 2] },
+            { n: 72, s: "Hf", name: "Hafnio", mass: "178.49", cat: "transition", g: 4, p: 6, e: [2, 8, 18, 32, 10, 2] },
+            { n: 73, s: "Ta", name: "Tantalio", mass: "180.95", cat: "transition", g: 5, p: 6, e: [2, 8, 18, 32, 11, 2] },
+            { n: 74, s: "W", name: "Tungsteno", mass: "183.84", cat: "transition", g: 6, p: 6, e: [2, 8, 18, 32, 12, 2] },
+            { n: 75, s: "Re", name: "Renio", mass: "186.21", cat: "transition", g: 7, p: 6, e: [2, 8, 18, 32, 13, 2] },
+            { n: 76, s: "Os", name: "Osmio", mass: "190.23", cat: "transition", g: 8, p: 6, e: [2, 8, 18, 32, 14, 2] },
+            { n: 77, s: "Ir", name: "Iridio", mass: "192.22", cat: "transition", g: 9, p: 6, e: [2, 8, 18, 32, 15, 2] },
+            { n: 78, s: "Pt", name: "Platino", mass: "195.08", cat: "transition", g: 10, p: 6, e: [2, 8, 18, 32, 17, 1] },
+            { n: 79, s: "Au", name: "Oro", mass: "196.97", cat: "transition", g: 11, p: 6, e: [2, 8, 18, 32, 18, 1] },
+            { n: 80, s: "Hg", name: "Mercurio", mass: "200.59", cat: "transition", g: 12, p: 6, e: [2, 8, 18, 32, 18, 2] },
+            { n: 81, s: "Tl", name: "Talio", mass: "204.38", cat: "post-transition", g: 13, p: 6, e: [2, 8, 18, 32, 18, 3] },
+            { n: 82, s: "Pb", name: "Plomo", mass: "207.2", cat: "post-transition", g: 14, p: 6, e: [2, 8, 18, 32, 18, 4] },
+            { n: 83, s: "Bi", name: "Bismuto", mass: "208.98", cat: "post-transition", g: 15, p: 6, e: [2, 8, 18, 32, 18, 5] },
+            { n: 84, s: "Po", name: "Polonio", mass: "209", cat: "post-transition", g: 16, p: 6, e: [2, 8, 18, 32, 18, 6] },
+            { n: 85, s: "At", name: "Astato", mass: "210", cat: "halogen", g: 17, p: 6, e: [2, 8, 18, 32, 18, 7] },
+            { n: 86, s: "Rn", name: "Radón", mass: "222", cat: "noble", g: 18, p: 6, e: [2, 8, 18, 32, 18, 8] },
+            { n: 87, s: "Fr", name: "Francio", mass: "223", cat: "alkali", g: 1, p: 7, e: [2, 8, 18, 32, 18, 8, 1] },
+            { n: 88, s: "Ra", name: "Radio", mass: "226", cat: "alkaline", g: 2, p: 7, e: [2, 8, 18, 32, 18, 8, 2] },
+            { n: 89, s: "Ac", name: "Actinio", mass: "227", cat: "actinide", g: 3, p: 7, e: [2, 8, 18, 32, 18, 9, 2] },
+            { n: 90, s: "Th", name: "Torio", mass: "232.04", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 18, 10, 2] },
+            { n: 91, s: "Pa", name: "Protactinio", mass: "231.04", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 20, 9, 2] },
+            { n: 92, s: "U", name: "Uranio", mass: "238.03", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 21, 9, 2] },
+            { n: 93, s: "Np", name: "Neptunio", mass: "237", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 22, 9, 2] },
+            { n: 94, s: "Pu", name: "Plutonio", mass: "244", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 24, 8, 2] },
+            { n: 95, s: "Am", name: "Americio", mass: "243", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 25, 8, 2] },
+            { n: 96, s: "Cm", name: "Curio", mass: "247", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 25, 9, 2] },
+            { n: 97, s: "Bk", name: "Berkelio", mass: "247", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 27, 8, 2] },
+            { n: 98, s: "Cf", name: "Californio", mass: "251", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 28, 8, 2] },
+            { n: 99, s: "Es", name: "Einstenio", mass: "252", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 29, 8, 2] },
+            { n: 100, s: "Fm", name: "Fermio", mass: "257", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 30, 8, 2] },
+            { n: 101, s: "Md", name: "Mendelevio", mass: "258", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 31, 8, 2] },
+            { n: 102, s: "No", name: "Nobelio", mass: "259", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 32, 8, 2] },
+            { n: 103, s: "Lr", name: "Laurencio", mass: "266", cat: "actinide", g: 3, p: 9, e: [2, 8, 18, 32, 32, 9, 2] },
+            { n: 104, s: "Rf", name: "Rutherfordio", mass: "267", cat: "transition", g: 4, p: 7, e: [2, 8, 18, 32, 32, 10, 2] },
+            { n: 105, s: "Db", name: "Dubnio", mass: "268", cat: "transition", g: 5, p: 7, e: [2, 8, 18, 32, 32, 11, 2] },
+            { n: 106, s: "Sg", name: "Seaborgio", mass: "269", cat: "transition", g: 6, p: 7, e: [2, 8, 18, 32, 32, 12, 2] },
+            { n: 107, s: "Bh", name: "Bohrio", mass: "270", cat: "transition", g: 7, p: 7, e: [2, 8, 18, 32, 32, 13, 2] },
+            { n: 108, s: "Hs", name: "Hassio", mass: "277", cat: "transition", g: 8, p: 7, e: [2, 8, 18, 32, 32, 14, 2] },
+            { n: 109, s: "Mt", name: "Meitnerio", mass: "278", cat: "transition", g: 9, p: 7, e: [2, 8, 18, 32, 32, 15, 2] },
+            { n: 110, s: "Ds", name: "Darmstadtio", mass: "281", cat: "transition", g: 10, p: 7, e: [2, 8, 18, 32, 32, 17, 1] },
+            { n: 111, s: "Rg", name: "Roentgenio", mass: "282", cat: "transition", g: 11, p: 7, e: [2, 8, 18, 32, 32, 18, 1] },
+            { n: 112, s: "Cn", name: "Copernicio", mass: "285", cat: "transition", g: 12, p: 7, e: [2, 8, 18, 32, 32, 18, 2] },
+            { n: 113, s: "Nh", name: "Nihonio", mass: "286", cat: "post-transition", g: 13, p: 7, e: [2, 8, 18, 32, 32, 18, 3] },
+            { n: 114, s: "Fl", name: "Flerovio", mass: "289", cat: "post-transition", g: 14, p: 7, e: [2, 8, 18, 32, 32, 18, 4] },
+            { n: 115, s: "Mc", name: "Moscovio", mass: "290", cat: "post-transition", g: 15, p: 7, e: [2, 8, 18, 32, 32, 18, 5] },
+            { n: 116, s: "Lv", name: "Livermorio", mass: "293", cat: "post-transition", g: 16, p: 7, e: [2, 8, 18, 32, 32, 18, 6] },
+            { n: 117, s: "Ts", name: "Teneso", mass: "294", cat: "halogen", g: 17, p: 7, e: [2, 8, 18, 32, 32, 18, 7] },
+            { n: 118, s: "Og", name: "Oganesón", mass: "294", cat: "noble", g: 18, p: 7, e: [2, 8, 18, 32, 32, 18, 8] }
+        ];
+
+        const CATEGORY_COLORS = {
+            "nonmetal": 0x3b82f6,
+            "noble": 0x8b5cf6,
+            "alkali": 0xef4444,
+            "alkaline": 0xf97316,
+            "metalloid": 0x10b981,
+            "halogen": 0x06b6d4,
+            "post-transition": 0x14b8a6,
+            "transition": 0xeab308,
+            "lanthanide": 0xec4899,
+            "actinide": 0xd946ef
+        };
+
+        // ==========================================
+        // SINTETIZADOR AUDIO WEB API (EFECTOS DE SONIDO)
+        // ==========================================
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playHover() {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.08);
+                } catch(e) {}
+            }
+
+            playSelect() {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(523.25, this.ctx.currentTime);
+                    osc.frequency.setValueAtTime(659.25, this.ctx.currentTime + 0.08);
+                    osc.frequency.setValueAtTime(783.99, this.ctx.currentTime + 0.16);
+                    gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.3);
+                } catch(e) {}
+            }
+        }
+
+        const sound = new SoundFX();
+
+        // ==========================================
+        // ENGINE THREE.JS & ESTADO GLOBAL
+        // ==========================================
+        let scene, renderer, cameraGroup;
+        let cameraMono, cameraLeft, cameraRight;
+        let raycaster;
+
+        let isSbsMode = false;
+        let isCameraActive = false;
+        let isAppRunning = false;
+
+        const interactiveObjects = [];
+        let reticleMono, reticleLeft, reticleRight;
+
+        let gazeTarget = null;
+        let dwellStartTime = 0;
+        const DWELL_DURATION = 1000; // 1.0s
+
+        let activeModalGroup = null;
+        let bohrAtomGroup = null;
+
+        // Variables de Giroscopio & Física de Rotación
+        let sensorActive = false;
+        let deviceEuler = new THREE.Euler();
+        let targetQuaternion = new THREE.Quaternion();
+        let currentQuaternion = new THREE.Quaternion();
+        let headingOffset = new THREE.Quaternion();
+
+        // Variables para Arrastre Táctil (Touch Drag Fallback)
+        let isTouchDragging = false;
+        let previousTouchX = 0, previousTouchY = 0;
+        let touchRotX = 0, touchRotY = 0;
+
+        // Matriz de corrección landscape / portrait
+        const qFrameCorrection = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+
+        // Inicializar Motor 3D
+        function initThreeJS() {
+            const container = document.getElementById('webgl-canvas-container');
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            scene = new THREE.Scene();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(width, height);
+            renderer.setClearColor(0x000000, 0); // WebGL Transparente para superponer a Cámara
+            container.appendChild(renderer.domElement);
+
+            cameraGroup = new THREE.Group();
+            scene.add(cameraGroup);
+
+            const fov = 70;
+            const ipd = 0.064; // 6.4cm interpupilary distance
+
+            cameraMono = new THREE.PerspectiveCamera(fov, width / height, 0.1, 100);
+
+            cameraLeft = new THREE.PerspectiveCamera(fov, (width / 2) / height, 0.1, 100);
+            cameraRight = new THREE.PerspectiveCamera(fov, (width / 2) / height, 0.1, 100);
+
+            cameraLeft.position.set(-ipd / 2, 0, 0);
+            cameraRight.position.set(ipd / 2, 0, 0);
+
+            cameraGroup.add(cameraMono);
+            cameraGroup.add(cameraLeft);
+            cameraGroup.add(cameraRight);
+
+            // Iluminación
+            const ambient = new THREE.AmbientLight(0xffffff, 1.3);
+            scene.add(ambient);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            raycaster = new THREE.Raycaster();
+
+            buildReticles();
+            buildPeriodicTable();
+
+            window.addEventListener('resize', onWindowResize, false);
+            setupTouchEvents();
+        }
+
+        // ==========================================
+        // RETÍCULOS DE MIRADA (GAZE RETICLES)
+        // ==========================================
+        function buildReticles() {
+            const createReticle = () => {
+                const group = new THREE.Group();
+
+                const ringGeo = new THREE.RingGeometry(0.013, 0.017, 32);
+                const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+
+                const dotGeo = new THREE.CircleGeometry(0.003, 16);
+                const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+                const dot = new THREE.Mesh(dotGeo, dotMat);
+
+                const progressGeo = new THREE.RingGeometry(0.018, 0.024, 32, 1, 0, 0);
+                const progressMat = new THREE.MeshBasicMaterial({ color: 0x10b981, side: THREE.DoubleSide, transparent: true, opacity: 1 });
+                const progressRing = new THREE.Mesh(progressGeo, progressMat);
+                progressRing.name = "progressRing";
+
+                group.add(ring);
+                group.add(dot);
+                group.add(progressRing);
+                group.position.z = -1.2;
+
+                return group;
+            };
+
+            reticleMono = createReticle();
+            reticleLeft = createReticle();
+            reticleRight = createReticle();
+
+            cameraMono.add(reticleMono);
+            cameraLeft.add(reticleLeft);
+            cameraRight.add(reticleRight);
+        }
+
+        function updateReticleProgress(percent) {
+            const angle = Math.min(Math.max(percent, 0), 1) * Math.PI * 2;
+            [reticleMono, reticleLeft, reticleRight].forEach(reticle => {
+                const progressRing = reticle.getObjectByName("progressRing");
+                if (progressRing) {
+                    progressRing.geometry.dispose();
+                    progressRing.geometry = new THREE.RingGeometry(0.018, 0.024, 32, 1, 0, angle);
+                }
+            });
+        }
+
+        // ==========================================
+        // CONSTRUCCIÓN DE LA TABLA PERIÓDICA EN 3D
+        // ==========================================
+        function buildPeriodicTable() {
+            const radius = 3.5;
+            const cardWidth = 0.26;
+            const cardHeight = 0.34;
+
+            ELEMENTS_DATA.forEach((el) => {
+                let col = el.g;
+                let row = el.p;
+
+                if (el.n >= 57 && el.n <= 71) {
+                    col = el.n - 57 + 3;
+                    row = 8.5;
+                } else if (el.n >= 89 && el.n <= 103) {
+                    col = el.n - 89 + 3;
+                    row = 9.7;
+                }
+
+                const totalCols = 18;
+                const angleX = ((col - (totalCols + 1) / 2) / totalCols) * (Math.PI * 0.75);
+                const yPos = (-(row - 4.5) * (cardHeight + 0.05)) + 0.15;
+
+                const texture = createTileCanvasTexture(el);
+                const geometry = new THREE.PlaneGeometry(cardWidth, cardHeight);
+                const material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    transparent: true,
+                    opacity: 0.95,
+                    side: THREE.DoubleSide
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.x = Math.sin(angleX) * radius;
+                mesh.position.z = -Math.cos(angleX) * radius;
+                mesh.position.y = yPos;
+
+                mesh.lookAt(0, yPos, 0);
+                mesh.userData = { type: "element", data: el };
+
+                scene.add(mesh);
+                interactiveObjects.push(mesh);
+            });
+        }
+
+        function createTileCanvasTexture(el) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 320;
+            const ctx = canvas.getContext('2d');
+
+            const hexColor = CATEGORY_COLORS[el.cat] || 0x3b82f6;
+            const cssColor = '#' + hexColor.toString(16).padStart(6, '0');
+
+            ctx.fillStyle = 'rgba(10, 15, 30, 0.94)';
+            ctx.beginPath();
+            ctx.roundRect(6, 6, 244, 308, 18);
+            ctx.fill();
+
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = cssColor;
+            ctx.stroke();
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'bold 28px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(el.n.toString(), 20, 42);
+
+            ctx.fillStyle = '#64748b';
+            ctx.font = '18px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(el.mass, 236, 42);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 84px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(el.s, 128, 172);
+
+            ctx.fillStyle = cssColor;
+            ctx.font = 'bold 24px sans-serif';
+            ctx.fillText(el.name, 128, 232);
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '16px monospace';
+            ctx.fillText(el.e.join('-'), 128, 275);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        // ==========================================
+        // PANEL HOLOGRÁFICO FLOTANTE Y ÁTOMO 3D BOHR
+        // ==========================================
+        function openElementModal(el) {
+            closeElementModal();
+            sound.playSelect();
+
+            activeModalGroup = new THREE.Group();
+
+            const activeCam = isSbsMode ? cameraLeft : cameraMono;
+            const camDir = new THREE.Vector3();
+            activeCam.getWorldDirection(camDir);
+
+            const modalPos = new THREE.Vector3().copy(cameraGroup.position).add(camDir.multiplyScalar(2.1));
+            activeModalGroup.position.copy(modalPos);
+            activeModalGroup.lookAt(cameraGroup.position);
+
+            // Placa Trasera Oscura (Alta visibilidad sobre fondo real)
+            const backdropGeo = new THREE.PlaneGeometry(2.1, 1.25);
+            const backdropMat = new THREE.MeshBasicMaterial({
+                color: 0x030712,
+                transparent: true,
+                opacity: 0.94,
+                side: THREE.DoubleSide
+            });
+            const backdropMesh = new THREE.Mesh(backdropGeo, backdropMat);
+            backdropMesh.position.z = -0.01;
+            activeModalGroup.add(backdropMesh);
+
+            // Borde Neón
+            const frameGeo = new THREE.PlaneGeometry(2.14, 1.29);
+            const frameMat = new THREE.MeshBasicMaterial({
+                color: CATEGORY_COLORS[el.cat] || 0x00ffff,
+                transparent: true,
+                opacity: 0.85,
+                side: THREE.DoubleSide
+            });
+            const frameMesh = new THREE.Mesh(frameGeo, frameMat);
+            frameMesh.position.z = -0.02;
+            activeModalGroup.add(frameMesh);
+
+            // Textura Información
+            const panelGeo = new THREE.PlaneGeometry(1.5, 1.1);
+            const panelCanvas = createModalCanvasTexture(el);
+            const panelMat = new THREE.MeshBasicMaterial({ map: panelCanvas, transparent: true, side: THREE.DoubleSide });
+            const panelMesh = new THREE.Mesh(panelGeo, panelMat);
+            panelMesh.position.x = -0.22;
+            activeModalGroup.add(panelMesh);
+
+            // Modelo Atómico de Bohr 3D
+            bohrAtomGroup = createBohrAtom3D(el);
+            bohrAtomGroup.position.set(0.62, 0.0, 0.08);
+            bohrAtomGroup.scale.set(0.42, 0.42, 0.42);
+            activeModalGroup.add(bohrAtomGroup);
+
+            // Botón CERRAR [X]
+            const closeBtnGeo = new THREE.PlaneGeometry(0.38, 0.12);
+            const closeBtnTexture = createCloseBtnTexture();
+            const closeBtnMat = new THREE.MeshBasicMaterial({ map: closeBtnTexture, transparent: true, side: THREE.DoubleSide });
+            const closeBtnMesh = new THREE.Mesh(closeBtnGeo, closeBtnMat);
+            closeBtnMesh.position.set(0, -0.7, 0.02);
+            closeBtnMesh.userData = { type: "closeButton" };
+
+            activeModalGroup.add(closeBtnMesh);
+            scene.add(activeModalGroup);
+
+            interactiveObjects.push(closeBtnMesh);
+        }
+
+        function closeElementModal() {
+            if (activeModalGroup) {
+                const closeBtn = activeModalGroup.children.find(c => c.userData && c.userData.type === "closeButton");
+                if (closeBtn) {
+                    const idx = interactiveObjects.indexOf(closeBtn);
+                    if (idx > -1) interactiveObjects.splice(idx, 1);
+                }
+
+                scene.remove(activeModalGroup);
+                activeModalGroup = null;
+                bohrAtomGroup = null;
+            }
+        }
+
+        function createModalCanvasTexture(el) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 768;
+            const ctx = canvas.getContext('2d');
+
+            const hexColor = CATEGORY_COLORS[el.cat] || 0x3b82f6;
+            const cssColor = '#' + hexColor.toString(16).padStart(6, '0');
+
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.98)';
+            ctx.beginPath();
+            ctx.roundRect(10, 10, 1004, 748, 24);
+            ctx.fill();
+
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = cssColor;
+            ctx.stroke();
+
+            ctx.fillStyle = cssColor;
+            ctx.font = 'bold 46px sans-serif';
+            ctx.fillText(`${el.name.toUpperCase()} (${el.s})`, 40, 75);
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '28px sans-serif';
+            ctx.fillText(`Número Atómico: ${el.n}  |  Masa: ${el.mass} u`, 40, 125);
+
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(40, 150);
+            ctx.lineTo(600, 150);
+            ctx.stroke();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = '26px sans-serif';
+            ctx.fillText(`• Categoría: ${el.cat.toUpperCase()}`, 40, 210);
+            ctx.fillText(`• Grupo: ${el.g}  |  Período: ${el.p}`, 40, 265);
+            ctx.fillText(`• Configuración de Electrones:`, 40, 320);
+
+            ctx.fillStyle = '#38bdf8';
+            ctx.font = 'bold 32px monospace';
+            ctx.fillText(`  ${el.e.join(' - ')}`, 40, 365);
+
+            ctx.fillStyle = '#334155';
+            ctx.beginPath();
+            ctx.roundRect(40, 410, 560, 120, 16);
+            ctx.fill();
+
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '20px sans-serif';
+            ctx.fillText('Modelo de Bohr en tiempo real según la', 60, 450);
+            ctx.fillText('configuración electrónica de sus capas.', 60, 485);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function createCloseBtnTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 96;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = 'rgba(225, 29, 72, 0.95)';
+            ctx.beginPath();
+            ctx.roundRect(4, 4, 248, 88, 16);
+            ctx.fill();
+
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 32px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('[X] CERRAR', 128, 58);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function createBohrAtom3D(el) {
+            const atomGroup = new THREE.Group();
+
+            const nColor = CATEGORY_COLORS[el.cat] || 0x00ffff;
+            const nucleusGeo = new THREE.SphereGeometry(0.12, 24, 24);
+            const nucleusMat = new THREE.MeshPhongMaterial({
+                color: nColor,
+                emissive: nColor,
+                emissiveIntensity: 0.7,
+                shininess: 100
+            });
+            const nucleus = new THREE.Mesh(nucleusGeo, nucleusMat);
+            atomGroup.add(nucleus);
+
+            el.e.forEach((count, levelIdx) => {
+                const orbitRadius = 0.28 + (levelIdx * 0.16);
+
+                const orbitGeo = new THREE.RingGeometry(orbitRadius - 0.004, orbitRadius + 0.004, 64);
+                const orbitMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+                const orbitMesh = new THREE.Mesh(orbitGeo, orbitMat);
+
+                orbitMesh.rotation.x = Math.PI / 2 + (levelIdx * 0.25);
+                orbitMesh.rotation.y = levelIdx * 0.35;
+
+                atomGroup.add(orbitMesh);
+
+                const electronGroup = new THREE.Group();
+                electronGroup.rotation.copy(orbitMesh.rotation);
+
+                for (let i = 0; i < count; i++) {
+                    const angle = (i / count) * Math.PI * 2;
+                    const eGeo = new THREE.SphereGeometry(0.028, 12, 12);
+                    const eMat = new THREE.MeshStandardMaterial({
+                        color: 0x22d3ee,
+                        emissive: 0x06b6d4,
+                        emissiveIntensity: 0.9
+                    });
+                    const eMesh = new THREE.Mesh(eGeo, eMat);
+
+                    eMesh.position.x = Math.cos(angle) * orbitRadius;
+                    eMesh.position.y = Math.sin(angle) * orbitRadius;
+
+                    electronGroup.add(eMesh);
+                }
+
+                electronGroup.userData = { speed: 1.2 + (levelIdx * 0.4) };
+                atomGroup.add(electronGroup);
+            });
+
+            return atomGroup;
+        }
+
+        function animateBohrAtom() {
+            if (!bohrAtomGroup) return;
+            bohrAtomGroup.rotation.y += 0.008;
+
+            bohrAtomGroup.children.forEach(child => {
+                if (child.userData && child.userData.speed) {
+                    child.rotation.z += 0.012 * child.userData.speed;
+                }
+            });
+        }
+
+        // ==========================================
+        // MANEJO DE GIROSCÓPIO & MOVIMIENTO FÍSICO
+        // ==========================================
+        function initGyroscope() {
+            const onDeviceOrientation = (e) => {
+                if (e.alpha === null || e.beta === null || e.gamma === null) return;
+
+                sensorActive = true;
+                updateGyroUI(true);
+
+                // Ángulos Euler en Radianes
+                const alpha = THREE.MathUtils.degToRad(e.alpha);
+                const beta = THREE.MathUtils.degToRad(e.beta);
+                const gamma = THREE.MathUtils.degToRad(e.gamma);
+
+                const screenAngle = THREE.MathUtils.degToRad(window.orientation || screen.orientation?.angle || 0);
+
+                // Three.js Euler ZXY
+                deviceEuler.set(beta, alpha, -gamma, 'YXZ');
+
+                targetQuaternion.setFromEuler(deviceEuler);
+                targetQuaternion.multiply(qFrameCorrection);
+
+                const qScreen = new THREE.Quaternion();
+                qScreen.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -screenAngle);
+                targetQuaternion.multiply(qScreen);
+
+                targetQuaternion.multiply(headingOffset);
+            };
+
+            // Escuchar ambos eventos de orientación (Estándar y Absoluto)
+            window.addEventListener('deviceorientation', onDeviceOrientation, true);
+            window.addEventListener('deviceorientationabsolute', onDeviceOrientation, true);
+        }
+
+        async function requestGyroscopePermission() {
+            sound.init();
+
+            // 1. Verificar contexto seguro HTTPS / localhost
+            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                document.getElementById('https-warning').classList.remove('hidden');
+            }
+
+            // 2. iOS Safari (requiere concesión explícita mediante recomendación de Apple)
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const response = await DeviceOrientationEvent.requestPermission();
+                    if (response === 'granted') {
+                        initGyroscope();
+                        return;
+                    } else {
+                        updateGyroUI(false, "Permiso iOS denegado");
+                    }
+                } catch (err) {
+                    console.error("Error al solicitar permiso iOS:", err);
+                }
+            }
+
+            // 3. Android Web API Permissions Check
+            if (navigator.permissions && navigator.permissions.query) {
+                try {
+                    const status = await navigator.permissions.query({ name: 'accelerometer' });
+                    if (status.state === 'denied') {
+                        updateGyroUI(false, "Sensor denegado en Chrome");
+                    }
+                } catch (e) {
+                    // Ignorar si el navegador no expone la API de acelerómetro explícita
+                }
+            }
+
+            // 4. Intentar suscripción directa estándar (Android/Chrome)
+            initGyroscope();
+
+            // Tiempo de espera para validar si llegaron datos reales de orientación
+            setTimeout(() => {
+                if (!sensorActive) {
+                    updateGyroUI(false, "Usando Control Táctil");
+                }
+            }, 1200);
+        }
+
+        function recenterCamera() {
+            headingOffset.copy(targetQuaternion).invert();
+            touchRotX = 0;
+            touchRotY = 0;
+        }
+
+        function updateGyroUI(active, labelText) {
+            const dot = document.getElementById('gyro-dot');
+            const text = document.getElementById('gyro-text');
+            const btn = document.getElementById('btn-request-gyro');
+
+            if (active) {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400";
+                text.innerText = labelText || "Giroscopio Activo";
+                btn.classList.add('active');
+            } else {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse";
+                text.innerText = labelText || "Giroscopio Inactivo";
+                btn.classList.remove('active');
+            }
+        }
+
+        // ==========================================
+        // GAZE RAYCASTING & TOUCH EVENTS (INCLUYE RESPALDO DRAG)
+        // ==========================================
+        function checkGazeInteraction() {
+            const activeCam = isSbsMode ? cameraLeft : cameraMono;
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), activeCam);
+
+            const intersects = raycaster.intersectObjects(interactiveObjects, false);
+
+            if (intersects.length > 0) {
+                const hitObject = intersects[0].object;
+
+                if (gazeTarget === hitObject) {
+                    const elapsed = performance.now() - dwellStartTime;
+                    const progress = elapsed / DWELL_DURATION;
+                    updateReticleProgress(progress);
+
+                    if (elapsed >= DWELL_DURATION) {
+                        triggerAction(hitObject);
+                        dwellStartTime = performance.now();
+                    }
+                } else {
+                    gazeTarget = hitObject;
+                    dwellStartTime = performance.now();
+                    updateReticleProgress(0);
+                    sound.playHover();
+                }
+            } else {
+                gazeTarget = null;
+                updateReticleProgress(0);
+            }
+        }
+
+        function setupTouchEvents() {
+            const container = window;
+
+            // Arrastre Táctil para rotar la cámara cuando no hay giroscopio
+            const onTouchStart = (e) => {
+                if (e.touches && e.touches.length === 1) {
+                    isTouchDragging = true;
+                    previousTouchX = e.touches[0].clientX;
+                    previousTouchY = e.touches[0].clientY;
+                }
+            };
+
+            const onTouchMove = (e) => {
+                if (!isAppRunning || !isTouchDragging) return;
+
+                if (e.touches && e.touches.length === 1) {
+                    const deltaX = e.touches[0].clientX - previousTouchX;
+                    const deltaY = e.touches[0].clientY - previousTouchY;
+
+                    previousTouchX = e.touches[0].clientX;
+                    previousTouchY = e.touches[0].clientY;
+
+                    // Si el giroscopio físico no está respondiendo, mover cámara con gestos
+                    if (!sensorActive) {
+                        touchRotY -= deltaX * 0.004;
+                        touchRotX -= deltaY * 0.004;
+                        touchRotX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, touchRotX));
+
+                        const euler = new THREE.Euler(touchRotX, touchRotY, 0, 'YXZ');
+                        targetQuaternion.setFromEuler(euler);
+                    }
+                }
+            };
+
+            const onTouchEnd = (e) => {
+                isTouchDragging = false;
+            };
+
+            const onTouchOrClick = (e) => {
+                if (!isAppRunning || isSbsMode) return;
+                sound.init();
+
+                let clientX = e.clientX;
+                let clientY = e.clientY;
+
+                if (e.changedTouches && e.changedTouches.length > 0) {
+                    clientX = e.changedTouches[0].clientX;
+                    clientY = e.changedTouches[0].clientY;
+                }
+
+                const mouse = new THREE.Vector2(
+                    (clientX / window.innerWidth) * 2 - 1,
+                    -(clientY / window.innerHeight) * 2 + 1
+                );
+
+                raycaster.setFromCamera(mouse, cameraMono);
+                const intersects = raycaster.intersectObjects(interactiveObjects, false);
+
+                if (intersects.length > 0) {
+                    triggerAction(intersects[0].object);
+                }
+            };
+
+            container.addEventListener('touchstart', onTouchStart, { passive: true });
+            container.addEventListener('touchmove', onTouchMove, { passive: true });
+            container.addEventListener('touchend', onTouchEnd, { passive: true });
+
+            container.addEventListener('click', onTouchOrClick);
+        }
+
+        function triggerAction(target) {
+            if (!target.userData) return;
+
+            if (target.userData.type === "element") {
+                openElementModal(target.userData.data);
+            } else if (target.userData.type === "closeButton") {
+                closeElementModal();
+            }
+        }
+
+        // ==========================================
+        // CÁMARA REAL EN SEGUNDO PLANO
+        // ==========================================
+        function toggleCameraPassthrough() {
+            const video = document.getElementById('ar-camera-video');
+            const btnCam = document.getElementById('btn-toggle-cam');
+
+            if (isCameraActive) {
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
+                video.style.display = 'none';
+                isCameraActive = false;
+                btnCam.classList.remove('active');
+            } else {
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "environment" } }, audio: false })
+                        .then(stream => {
+                            video.srcObject = stream;
+                            video.style.display = 'block';
+                            isCameraActive = true;
+                            btnCam.classList.add('active');
+                        })
+                        .catch(() => {
+                            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+                                .then(stream => {
+                                    video.srcObject = stream;
+                                    video.style.display = 'block';
+                                    isCameraActive = true;
+                                    btnCam.classList.add('active');
+                                })
+                                .catch(err => console.log("Cámara no disponible:", err));
+                        });
+                }
+            }
+        }
+
+        function toggleSbsMode() {
+            isSbsMode = !isSbsMode;
+            const btnSbs = document.getElementById('btn-sbs');
+            if (isSbsMode) {
+                btnSbs.classList.add('active');
+            } else {
+                btnSbs.classList.remove('active');
+            }
+            onWindowResize();
+        }
+
+        // ==========================================
+        // ANIMATION LOOP & RENDER
+        // ==========================================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isAppRunning) {
+                // Suavizado Slerp de cámara con giroscopio o rotación táctil
+                currentQuaternion.slerp(targetQuaternion, 0.18);
+                cameraGroup.quaternion.copy(currentQuaternion);
+
+                checkGazeInteraction();
+                animateBohrAtom();
+
+                if (isSbsMode) {
+                    renderSBS();
+                } else {
+                    renderMono();
+                }
+            }
+        }
+
+        function renderMono() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            renderer.setScissorTest(false);
+            renderer.setViewport(0, 0, width, height);
+            renderer.render(scene, cameraMono);
+        }
+
+        function renderSBS() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const halfWidth = Math.floor(width / 2);
+
+            renderer.setScissorTest(true);
+
+            // Ojo Izquierdo
+            renderer.setViewport(0, 0, halfWidth, height);
+            renderer.setScissor(0, 0, halfWidth, height);
+            renderer.render(scene, cameraLeft);
+
+            // Ojo Derecho
+            renderer.setViewport(halfWidth, 0, halfWidth, height);
+            renderer.setScissor(halfWidth, 0, halfWidth, height);
+            renderer.render(scene, cameraRight);
+
+            renderer.setScissorTest(false);
+        }
+
+        function onWindowResize() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            renderer.setSize(width, height);
+
+            cameraMono.aspect = width / height;
+            cameraMono.updateProjectionMatrix();
+
+            const aspectSBS = (width / 2) / height;
+            cameraLeft.aspect = aspectSBS;
+            cameraLeft.updateProjectionMatrix();
+
+            cameraRight.aspect = aspectSBS;
+            cameraRight.updateProjectionMatrix();
+        }
+
+        // ==========================================
+        // START EXPERIENCE HANDLER
+        // ==========================================
+        async function startApp() {
+            sound.init();
+            document.getElementById('permission-overlay').style.display = 'none';
+            document.getElementById('ui-bar').style.display = 'flex';
+
+            // Activar permisos directamente tras interacción explícita del usuario
+            await requestGyroscopePermission();
+            toggleCameraPassthrough();
+
+            const docEl = document.documentElement;
+            if (docEl.requestFullscreen) docEl.requestFullscreen().catch(() => {});
+
+            isAppRunning = true;
+        }
+
+        // Event Listeners
+        document.getElementById('btn-start-experience').addEventListener('click', startApp);
+        document.getElementById('btn-toggle-cam').addEventListener('click', toggleCameraPassthrough);
+        document.getElementById('btn-request-gyro').addEventListener('click', requestGyroscopePermission);
+        document.getElementById('btn-sbs').addEventListener('click', toggleSbsMode);
+        document.getElementById('btn-recenter').addEventListener('click', recenterCamera);
+
+        window.onload = () => {
+            initThreeJS();
+            animate();
+        };
+    </script>
+</body>
+</html>
